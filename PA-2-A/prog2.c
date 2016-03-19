@@ -39,8 +39,9 @@
 
 
 /* called from layer 5, passed the data to be sent to other side */
-   A_output(message)
-  struct msg message; // 20 byte char array
+   void A_output(struct msg message)
+   //A_output(message)
+  //struct msg message; // 20 byte char array
   {
   //  A output(message), 
   //    where message is a structure of type msg, 
