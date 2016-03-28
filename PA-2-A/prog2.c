@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h> // added for memcpy
+#include <assert.h> // may stay, may not
 
 /* ******************************************************************
  ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
@@ -33,15 +35,21 @@
      char payload[20];
    };
 
+//****************** My Globals *********************************************
+int wait_seq_num = 0; //  flag indicating which seq number A/B should be waiting for  // assume only one var needed......
+int ack_num = 0;  //  flag indicating which acknowledgment was received.
+int A_to_B_in_transit = 0; // flag indicating that a message is currently in transit from the sender to the receiver. 
+struct pkt saved_packet; //  save the last sent packet in case we need to resend it.
+//****************** End of My Globals *********************************************
+
+//*********************** My method prototypes ***********************************************
+uint checksum(struct pkt* packet_addr, uint count);  // highly suspect!!!
+//*********************** End of My method prototypes ***********************************************
+
 //  TODO: part a requires implementing a Alternating Bit protocol...
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 // THE NEXT 7 routines are "layer 4".
 
-
-/* called from layer 5, passed the data to be sent to other side */
-  A_output(message)
-  struct msg message; // 20 byte char array
-  {
   //  A output(message), 
   //    where message is a structure of type msg, 
   //    containing data to be sent to the B-side. 
@@ -49,81 +57,341 @@
   //  It is the job of your protocol to insure that the data in such a message is delivered in-order, 
   //    and correctly, 
   //    to the receiving side upper layer.
+/* called from layer 5, passed the data to be sent to other side */
+//  we assume that layer 5 does not make mistakes when it comes to sequence numbers.... **********
+A_output(message)
+  struct msg message; // 20 byte char array
+  {
+    printf("**********************entering A_output()\n");
+    printf("**** A_output's passed in message: %s\n", message.data);
+    // local 'message' holder
+    char p_load[20];
+    //  local checksum holder
+    uint temp_checksum = 0;
 
-  //  TODO: We'll need to read up on how seq and ack numbers are giong to be handled
+    memcpy(p_load, message.data, 20);
 
-  //  TODO: we will need to assemble the packet and place the message as its payload.
+    printf("**** A_output's passed in message after memcpy: %s\n", message.data);
 
-  //  TODO: we will need to calculate the checksum......
-  }
+    printf("*****memcpy to p_load: %s\n", p_load);
+
+     // make a packet
+    struct pkt send_packet;  
+
+    //  if turn is wait_seq_num == 0:
+    if(wait_seq_num == 0)
+    {
+      printf("**************wait_seq_num is 0\n");
+      //  Assemble packet
+      send_packet.seqnum = wait_seq_num;
+      send_packet.acknum = wait_seq_num;
+      send_packet.checksum = 0;                     //************************************8         
+      memcpy(send_packet.payload, p_load, 20);
+      // calculate checksum
+      temp_checksum = checksum(&send_packet, 36); // 4 + 4 + 4 + 20
+      send_packet.checksum = temp_checksum;
+
+      //  save the packet to global place holder
+      memcpy(&saved_packet, &send_packet,  36);
+      printf("***saved_packet's payload after memcpy: %s\n", saved_packet.payload);
+    }
+      //  if turn is wait_seq_num == 1:
+    else
+    {
+      assert(wait_seq_num == 1);
+
+              //  Assemble packet
+      send_packet.seqnum = wait_seq_num;
+      send_packet.acknum = wait_seq_num;
+      send_packet.checksum = 0;                
+      memcpy(send_packet.payload, p_load,  20);
+        // calculate checksum
+        temp_checksum = checksum(&send_packet, 36); // 4 + 4 + 4 + 20
+        send_packet.checksum = temp_checksum;
+
+        //  save the packet to global place holder
+        memcpy(&saved_packet, &send_packet,  36);
+      }
+
+      printf("***********A_output sending packet with seq: %d, ack: %d, and checksum: %d\n", send_packet.seqnum, send_packet.acknum, send_packet.checksum);
+
+      //    send packet to layer 3
+      tolayer3(0, send_packet);
+      printf("**************A_output is starting the timer\n");
+      //    start timer    
+      starttimer(0, 1.0);    //  suspect interval....
+      //A_timer_expired = 0;
+      printf("*****************A_output returned\n");
+    }
 
 B_output(message)  /* need be completed only for extra credit */
-  struct msg message;
-  {
+    struct msg message;
+    {
 
-  }
+    }
 
-/* called from layer 3, when a packet arrives for layer 4 */
-  A_input(packet)
-  struct pkt packet;
-  {
   //  A input(packet), 
   //    where packet is a structure of type pkt. 
   //  This routine will be called whenever a packet sent from the B-side 
   //    (i.e., as a result of a tolayer3() being done by a B-side procedure) arrives at the A-side. 
   //  packet is the (possibly corrupted) packet sent from the B-side.
-  }
+/* called from layer 3, when a packet arrives for layer 4 */
+    A_input(packet)
+    struct pkt packet;
+    {
+      printf("@@@@@@@@@@@@@@@ entering A_input\n");
+      char locl_payload[20];
 
-/* called when A's timer goes off */
-  A_timerinterrupt()
-  {
+      int locl_seqnum = packet.seqnum;
+      int locl_acknum = packet.acknum;
+      int locl_checksum = packet.checksum;
+      memcpy(locl_payload, packet.payload,  20);
+
+    //  set the received packet's checksum to zero so we can verify it
+      packet.checksum = 0;
+
+    //  return if packet is corrupt.
+      if(locl_checksum != (checksum(&packet, 36)))
+      {
+        return;
+      }
+
+    //  Waiting for ACK 0 (3 cases):
+    if(wait_seq_num == 0)      //  TODO: seq_num being 0 should mean we are waiting for AKC == 0....
+    {
+        //    Case 1: ACK == 1
+      if(locl_acknum == 1)
+      {
+          return; //              DO nothing
+        }
+        //    Case 3: Packet is legit and ACK is 0
+        else
+        {
+          assert(locl_acknum == 0);
+          stoptimer(0);
+          //  deliver data to layer 5
+          //tolayer5(0, locl_payload);
+          // set member wait_seq_num to 1
+          wait_seq_num = 1;
+          return;
+        }
+      }
+      else
+      {
+        assert(wait_seq_num == 1);
+        //    Case 1: ACK == 0
+        if(locl_acknum == 0)
+        {
+          return; //              DO nothing
+        }
+        //    Case 3: Packet is legit and ACK is 0
+        else
+        {
+          assert(locl_acknum == 1);
+          stoptimer(0);
+          //  deliver data to layer 5
+          //tolayer5(0, locl_payload);
+          // set member wait_seq_num to 0
+          wait_seq_num = 0;
+          return;
+        }
+      }
+    }
+
   //  A timerinterrupt() 
   //  This routine will be called when A’s timer expires (thus generating a timer interrupt). 
   //  You can use this routine to control the retransmission of packets. 
   //  See starttimer() and stoptimer() below for how the timer is started and stopped.
-  }  
+/* called when A's timer goes off */
+    A_timerinterrupt()
+    {
+      printf("$$$$$$$$$$ A_timerinterrupt was called\n");
+      tolayer3(0, saved_packet);
+      starttimer(0);
+    }  
 
-/* the following routine will be called once (only) before any other */
-/* entity A routines are called. You can use it to do any initialization */
-  A_init()
-  {
   //  A init() This routine will be called once, 
   //    before any of your other A-side routines are called. 
   //  It can be used to do any required initialization.
+/* the following routine will be called once (only) before any other */
+/* entity A routines are called. You can use it to do any initialization */
+    A_init()
+    {
+      //bbbbbbbbbbbbbbbbbbbb�
+      //bbbbbbbbbbbbbbbbbbbb�
+
 
   //  TODO: Not sure what to do here...
   //          How are we going to keep track of seq/ack numbers????
+    }
 
-  }
-
-
-/* Note that with simplex transfer from a-to-B, there is no B_output() */
-
-/* called from layer 3, when a packet arrives for layer 4 at B*/
-  B_input(packet)
-  struct pkt packet;
-  {
   //  B input(packet), 
   //    where packet is a structure of type pkt. 
   //  This routine will be called whenever a packet sent from the A-side 
   //    (i.e., as a result of a tolayer3() being done by a A-side procedure) arrives at the B-side. 
   //  packet is the (possibly corrupted) packet sent from the A-side.
-  }
+/* Note that with simplex transfer from a-to-B, there is no B_output() */
+/* called from layer 3, when a packet arrives for layer 4 at B*/
+    B_input(packet)
+    struct pkt packet;
+    {
+      printf("^^^^^^^^^^^^^^^entering B_input\n");
+    // acknowldegment packet 
+    struct pkt ack_packet; // = NULL;
+    //  acknowledgment packet's checksum
+    uint temp_ack_packet_checksum = 0;
+
+    // store packet fields
+    int locl_seq_num = packet.seqnum;
+    int locl_ack_num = packet.acknum;
+    int locl_checksum = packet.checksum;
+    char locl_payload[20]; 
+    char ack_payload[20];
+    memcpy(locl_payload, packet.payload, 20);
+
+    printf("B received packet with seq: %d, ack: %d, and checksum: %d\n", locl_seq_num, locl_ack_num, locl_checksum);
+
+    // clear checksum to 0 in packet because that's what we did when we created the packet in the first place.
+    packet.checksum = 0;
+
+  //  State 0 (waiting for seq_num == 0 from below):
+    if(wait_seq_num == 0)
+    {
+        // Parse the uncorrupted packet with seq_num ==0
+        //  if the packet is not corrupt, and has seq_num == 0,
+      if(packet.seqnum == 0 && (checksum(&packet, 36) == locl_checksum))
+      {
+          //  deliver data to layer 5,
+        tolayer5(1, locl_payload);
+          // switch global seq number 
+        wait_seq_num = 1;
+
+        ack_packet.seqnum = locl_seq_num;
+        ack_packet.acknum = locl_ack_num;
+        ack_packet.checksum = 0;
+        memcpy(ack_packet.payload, ack_payload, 20);
+
+          // derive checksum for acknowledgmet packet
+        temp_ack_packet_checksum = checksum(&ack_packet, 36);
+        ack_packet.checksum = temp_ack_packet_checksum;
+
+          // send acknowledgement packet to A
+        tolayer3(1, ack_packet);
+        return;
+        printf("*************B received packet with seq 0 and sent acknowledgement");
+      }
+        //  if, on the other hand, the packet is corrupt or has seq_num == 1
+      else
+      {
+          //  assemble acknowledgment packet with seq_num == 1,
+          //  send acknowledgement packet through layer 3
+        ack_packet.seqnum = 1;
+          ack_packet.acknum = 1;    // suspect..............***********
+          ack_packet.checksum = 0;
+          memcpy(ack_packet.payload, ack_payload, 20);
+
+          // derive checksum for acknowledgmet packet
+          temp_ack_packet_checksum = checksum(&ack_packet, 36);
+          ack_packet.checksum = temp_ack_packet_checksum;
+
+          // send acknowledgement packet to A
+          tolayer3(1, ack_packet);
+          return;
+        }
+      } 
+      //  State 1 (waiting for seq_num == 1 from below):
+      else
+      {
+        assert(wait_seq_num == 1);
+        if(packet.seqnum == 1 && (checksum(&packet, 36) == locl_checksum))
+        {
+          //  deliver data to layer 5,
+          tolayer5(1, locl_payload);
+          // switch global seq number 
+          wait_seq_num = 0;
+
+          ack_packet.seqnum = locl_seq_num;
+          ack_packet.acknum = locl_ack_num;
+          ack_packet.checksum = 0;
+          memcpy(ack_packet.payload, ack_payload, 20);
+
+          // derive checksum for acknowledgmet packet
+          temp_ack_packet_checksum = checksum(&ack_packet, 36);
+          ack_packet.checksum = temp_ack_packet_checksum;
+
+          // send acknowledgement packet to A
+          tolayer3(1, ack_packet);
+          return;
+        }
+        //  if, on the other hand, the packet is corrupt or has seq_num == 0
+        else
+        {
+          //  assemble acknowledgment packet with seq_num == 0,
+          //  send acknowledgement packet through layer 3
+          ack_packet.seqnum = 0;
+          ack_packet.acknum = 0;    // suspect..............***********
+          ack_packet.checksum = 0;
+          memcpy(ack_packet.payload, ack_payload, 20);
+
+          // derive checksum for acknowledgmet packet
+          temp_ack_packet_checksum = checksum(&ack_packet, 36);
+          ack_packet.checksum = temp_ack_packet_checksum;
+
+          // send acknowledgement packet to A
+          tolayer3(1, ack_packet);
+          return;
+        }
+      }
+    }
 
 /* called when B's timer goes off */
-  B_timerinterrupt()
-  {
-  }
+    B_timerinterrupt()
+    {
+  //  ????? I'm assuming we don't need this unless we do the extra credit...
+    }
 
 /* the following rouytine will be called once (only) before any other */
 /* entity B routines are called. You can use it to do any initialization */
-  B_init()
+    B_init()
+    {
+
+    }
+
+//***************************************** My Methods  *************************************
+    void save_packet()
+    {
+
+    }
+
+//uint checksum(struct pkt* packet_addr, uint count)  // highly suspect!!!
+uint checksum(struct pkt* packet_addr, uint count)  // highly suspect!!!
+{
+  register uint sum = 0;
+
+  // main summing loop
+  while(count > 1)
   {
-  //  B init() This routine will be called once, 
-  //    before any of your other B-side routines are called. 
-  //  It can be used to do any required initialization.
+    sum = sum + (*((uint*) packet_addr) + 1);     // highly suspect!!
+    //sum = sum + *((void*) packet_addr)++;
+    //sum = sum + *((uint*) packet_addr)++;
+    //sum = sum + *(packet_addr)++;
+    count = count - 4;
   }
 
+  //  Add left-over word, if any
+  if(count > 0)
+  {
+    sum = sum + *((unsigned char*) packet_addr);
+  }
+
+  return(~sum);
+}
+
+void extract_packet()
+{
+
+}
+//***************************************** End of My Methods  *************************************
 
 /*****************************************************************
 ***************** NETWORK EMULATION CODE STARTS BELOW ***********
@@ -188,10 +456,11 @@ main()
  B_init();
 
  while (1) {
-        eventptr = evlist;            /* get next event to simulate */
+  eventptr = evlist;            /* get next event to simulate */
   if (eventptr==NULL)
    goto terminate;
-        evlist = evlist->next;        /* remove this event from event list */
+
+  evlist = evlist->next;        /* remove this event from event list */
  if (evlist!=NULL)
    evlist->prev=NULL;
  if (TRACE>=2) {
@@ -232,11 +501,14 @@ else if (eventptr->evtype ==  FROM_LAYER3) {
   pkt2give.checksum = eventptr->pktptr->checksum;
   for (i=0; i<20; i++)  
     pkt2give.payload[i] = eventptr->pktptr->payload[i];
-	    if (eventptr->eventity ==A)      /* deliver packet by calling */
-   	       A_input(pkt2give);            /* appropriate entity */
+	if (eventptr->eventity ==A)      /* deliver packet by calling */
+   	A_input(pkt2give);            /* appropriate entity */
   else
+  {
    B_input(pkt2give);
-	    free(eventptr->pktptr);          /* free the memory for packet */
+   printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!B_input was called in main\n");
+  }
+	free(eventptr->pktptr);          /* free the memory for packet */
 }
 else if (eventptr->evtype ==  TIMER_INTERRUPT) {
   if (eventptr->eventity == A) 
@@ -453,6 +725,7 @@ tolayer3(AorB,packet)                                 //    **    we can call th
 int AorB;  /* A or B is trying to stop timer */
 struct pkt packet;
 {
+  //printf("<<<<<<<<<<<<<<<<<<entering tolayer3\n");
  struct pkt *mypktptr;
  struct event *evptr,*q;
  //char *malloc();
@@ -520,6 +793,8 @@ evptr = (struct event *)malloc(sizeof(struct event));
      if (TRACE>2)  
        printf("          TOLAYER3: scheduling arrival on other side\n");
      insertevent(evptr);
+
+     //printf("<<<<<<<<<<<<<<<<leaving tolayer3\n");
    } 
 
    tolayer5(AorB,datasent)    //  **      **    **    we can call this
