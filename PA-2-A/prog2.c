@@ -62,7 +62,6 @@ uint checksum(struct pkt* packet_addr, uint count);  // highly suspect!!!
 A_output(message)
   struct msg message; // 20 byte char array
   {
-    printf("**********************entering A_output()\n");
     printf("**** A_output's passed in message: %s\n", message.data);
     // local 'message' holder
     char p_load[20];
@@ -81,7 +80,6 @@ A_output(message)
     //  if turn is wait_seq_num == 0:
     if(wait_seq_num == 0)
     {
-      printf("**************wait_seq_num is 0\n");
       //  Assemble packet
       send_packet.seqnum = wait_seq_num;
       send_packet.acknum = wait_seq_num;
@@ -113,15 +111,13 @@ A_output(message)
         memcpy(&saved_packet, &send_packet,  36);
       }
 
-      printf("***********A_output sending packet with seq: %d, ack: %d, and checksum: %d\n", send_packet.seqnum, send_packet.acknum, send_packet.checksum);
+      printf("***********A_output sending packet with seq: %d, ack: %d, checksum: %d, and payload: %s\n", send_packet.seqnum, send_packet.acknum, send_packet.checksum, send_packet.payload);
+      printf("***** size of sending payload: %ld\n", sizeof(send_packet.payload));
 
       //    send packet to layer 3
       tolayer3(0, send_packet);
-      printf("**************A_output is starting the timer\n");
       //    start timer    
-      starttimer(0, 1.0);    //  suspect interval....
-      //A_timer_expired = 0;
-      printf("*****************A_output returned\n");
+      starttimer(0, 5.0);    //  suspect interval....
     }
 
 B_output(message)  /* need be completed only for extra credit */
@@ -207,7 +203,7 @@ B_output(message)  /* need be completed only for extra credit */
     {
       printf("$$$$$$$$$$ A_timerinterrupt was called\n");
       tolayer3(0, saved_packet);
-      starttimer(0);
+      starttimer(0, 5.0);
     }  
 
   //  A init() This routine will be called once, 
@@ -249,7 +245,7 @@ B_output(message)  /* need be completed only for extra credit */
     char ack_payload[20];
     memcpy(locl_payload, packet.payload, 20);
 
-    printf("B received packet with seq: %d, ack: %d, and checksum: %d\n", locl_seq_num, locl_ack_num, locl_checksum);
+    printf("^^^^^^^B received packet with seq: %d, ack: %d, checksum: %d, and payload: %s\n", locl_seq_num, locl_ack_num, locl_checksum, packet.payload);
 
     // clear checksum to 0 in packet because that's what we did when we created the packet in the first place.
     packet.checksum = 0;
@@ -504,10 +500,7 @@ else if (eventptr->evtype ==  FROM_LAYER3) {
 	if (eventptr->eventity ==A)      /* deliver packet by calling */
    	A_input(pkt2give);            /* appropriate entity */
   else
-  {
    B_input(pkt2give);
-   printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!B_input was called in main\n");
-  }
 	free(eventptr->pktptr);          /* free the memory for packet */
 }
 else if (eventptr->evtype ==  TIMER_INTERRUPT) {
